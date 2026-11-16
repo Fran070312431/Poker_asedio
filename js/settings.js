@@ -27,3 +27,16 @@ const Settings = {
     if (typeof Sound !== 'undefined') Sound.apply();
   }
 };
+
+/* ===== Pantalla responsive =====
+   En el navegador del móvil hay barras arriba y abajo que tapan parte de la pantalla, y "100vh"
+   cuenta también lo que tapan. Aquí medimos el alto que de verdad se ve y lo guardamos en --vh:
+   el CSS calcula con él el tamaño de las cartas y las torres. Se vuelve a medir al girar el móvil
+   o cuando las barras aparecen y desaparecen. */
+function visibleHeight() {
+  return Math.round(window.visualViewport ? visualViewport.height : innerHeight);
+}
+function fitScreen() {
+  document.documentElement.style.setProperty('--vh', visibleHeight() + 'px');
+}
+fitScreen();

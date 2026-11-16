@@ -259,7 +259,7 @@ function render() {
    El giro también abre el abanico hacia los lados, así que se descuenta del ancho disponible. */
 function fanVars(n) {
   const W = Math.min(innerWidth, 480) - 32;
-  const card = Math.max(36, Math.min(74, (innerHeight - 290) / 7.2));     // igual que --h en el CSS
+  const card = Math.max(36, Math.min(74, (visibleHeight() - 290) / 7.2));     // igual que --h en el CSS
   n = Math.max(n, 1);
   const a = n > 1 ? Math.min(5, 14 / (n - 1)) : 0;                       // grados por carta
   const spread = 1.5 * card * 1.4 * Math.sin((n - 1) / 2 * a * Math.PI / 180) * 2;
@@ -835,3 +835,16 @@ Sprites.load();
 Settings.apply();
 render();
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => requestAnimationFrame(Scene.draw));
+
+/* Al girar el móvil o cuando aparecen/desaparecen las barras del navegador: se mide otra vez y se redibuja. */
+let fitT;
+function onResize() {
+  clearTimeout(fitT);
+  fitT = setTimeout(() => {
+    fitScreen();
+    if (!G.animating && !document.body.classList.contains('dragging')) render();
+    requestAnimationFrame(Scene.draw);
+  }, 120);
+}
+window.addEventListener('resize', onResize);
+if (window.visualViewport) visualViewport.addEventListener('resize', onResize);

@@ -9,12 +9,12 @@
   --crt:.6;
   /* --h: ancho de las cartas de las manos; --t: ancho de las torres. Crecen con el alto de la pantalla
      (hasta 74 px) para que el tablero siempre quepa entero y quede simétrico. Misma fórmula en fanVars(). */
-  --h:clamp(36px,calc((100vh - 290px) / 7.2),74px);
+  --h:clamp(36px,calc((var(--vh,100vh) - 290px) / 7.2),74px);
   --t:calc(var(--h) * .86);
   color-scheme:dark;
 }
 *{box-sizing:border-box}
-html,body{height:100%;margin:0;overflow:hidden}
+html,body{height:var(--vh,100%);margin:0;overflow:hidden}
 body{background:var(--bg);color:var(--bone);font-family:var(--body);font-size:20px;line-height:1.15}
 button,input{font:inherit;color:inherit}
 button{cursor:pointer}
@@ -22,7 +22,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--amber);outline-
 .spr{display:inline-block;background:center/contain no-repeat;image-rendering:pixelated;flex:none}
 
 /* El escenario entero (fondo, mesa y efectos) tiembla junto */
-#stage{position:fixed;inset:0}
+#stage{position:fixed;left:0;right:0;top:0;height:var(--vh,100%)}
 #scene{position:absolute;top:0;left:50%;transform:translateX(-50%);width:100%;height:100%;image-rendering:pixelated;transition:filter .8s}
 .app{position:relative;z-index:1;max-width:480px;height:100%;margin:0 auto;padding:10px 16px;display:flex;flex-direction:column;gap:6px}
 #fx{position:absolute;inset:0;z-index:20;pointer-events:none;perspective:800px}
@@ -329,7 +329,17 @@ body.crt #crt{display:block}
 .logo{width:min(64vw,260px);height:auto;image-rendering:pixelated;filter:drop-shadow(0 0 18px rgba(232,150,60,.25))}
 .menu .logo{width:min(78vw,325px)}
 
-/* En el móvil, 100vh incluye la barra del navegador y las cartas quedaban por debajo:
-   100dvh es solo la parte que se ve. */
-@supports (height:100dvh){:root{--h:clamp(36px,calc((100dvh - 290px) / 7.2),74px)}}
+/* Hueco para la barra de inicio del iPhone */
 .hand{padding-bottom:calc(16px + env(safe-area-inset-bottom,0px))}
+/* Menú en pantallas bajas (móvil con las barras del navegador): todo más compacto para que quepa */
+@media (max-height:640px){
+  .menu{gap:6px;padding-bottom:10px}
+  .menu h1{padding-top:8px}
+  .menu .logo{width:min(64vw,260px)}
+  .mfan{min-height:120px}
+  .mc{width:64px;margin:0 -8px}
+  .plate{padding:8px;gap:6px}
+  .stack{gap:6px}
+  .btn{padding:7px 12px}
+  .trio .btn{padding:5px 4px;font-size:15px}
+}
