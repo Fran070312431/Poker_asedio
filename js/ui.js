@@ -159,14 +159,14 @@ function render() {
     <p style="--k:0">La noche cae sobre el valle.</p>
     <p style="--k:1">Dos reyes. Ocho torres.</p>
     <p style="--k:2">Una sola baraja.</p>
-    <h1><img class="logo" src="img/logo.png" alt="Asedio"></h1>
+    <h1 class="brand"><img class="logo" src="img/logo.png" alt="Asedio"></h1>
     <span class="tap">Toca para empezar</span>`;
     return;
   }
   if (G.screen === 'menu') {
     app.className = 'app menu';
     app.innerHTML = `
-    <h1><img class="logo" src="img/logo.png" alt="Asedio"></h1>
+    <h1 class="brand"><img class="logo" src="img/logo.png" alt="Asedio"></h1>
     <div class="mfan"><div class="mfan-in" id="mfan">${MENU_CARDS.map((c, i) =>
       `<button class="mc" data-act="mcard" data-i="${i}" style="--d:${i - 1.5};--k:${i}" aria-label="${show(c)}"><span class="mcf"><span class="mct"><span class="mci">${face(c)}</span></span></span></button>`).join('')}</div></div>
     <div class="plate">

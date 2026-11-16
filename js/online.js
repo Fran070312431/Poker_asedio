@@ -1,33 +1,28 @@
 /* ===== Partidas online con código =====
    Dos formas de conectar, según dónde esté abierta la página:
 
-   1) En cualquier web (itch.io, tu propio hosting...): PeerJS (js/vendor/peerjs.min.js, licencia MIT).
-      Los dos móviles se conectan directamente entre sí (WebRTC). El servidor gratuito de PeerJS
-      (0.peerjs.com) solo sirve para que se encuentren: quien crea la partida se registra con el
-      nombre "asedio-CODIGO" y quien se une llama a ese nombre.
-      Quien crea es el jugador 0 y quien se une el jugador 1. La partida vive en los dos navegadores:
-      después de cada jugada, quien juega envía el estado completo al otro.
+   1) En cualquier web (GitHub Pages, itch.io, Live Server...): un servidor MQTT público y gratuito
+      (js/vendor/mqtt.min.js, licencia MIT). MQTT es un "tablón de mensajes": cada partida es un tema
+      (topic) con su código, y el servidor guarda siempre el último estado de la partida.
+      Los dos jugadores escriben y leen ese tema, así que funciona en cualquier red (wifi o datos),
+      y si alguien cierra el juego puede volver a entrar con el mismo código.
 
    2) En la página publicada en Claude: el almacenamiento compartido de Claude (claude.use('db')),
       porque allí el navegador no deja conectar con servidores externos.
 
    Usa G, render, processEvents y leave, que están en ui.js. */
-const PREFIX = 'asedio-game-';
-const NO_ONLINE = 'No se puede jugar online desde aquí: abre el juego desde una web (por ejemplo, itch.io).';
-const NO_WRITE = 'No tienes permiso para escribir en esta página. El dueño debe invitarte con permiso para editar.';
-const Net = { mode: null, peer: null, conn: null };
 
-/* Servidores que ayudan a que dos móviles se encuentren a través de routers y redes móviles.
-   STUN: averigua tu dirección pública (gratis, varios por si uno falla).
-   TURN: hace de puente cuando la conexión directa está bloqueada (los gratuitos de PeerJS).
-   Si alguna red no conecta, puedes añadir aquí un TURN propio (por ejemplo, una cuenta gratis de Metered). */
-const ICE = [
-  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] },
-  { urls: 'stun:stun.cloudflare.com:3478' },
-  { urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'], username: 'peerjs', credential: 'peerjsp' }
+/* Servidores MQTT públicos (conexión segura wss). Si el primero falla se prueba el siguiente. */
+const BROKERS = window.ASEDIO_BROKERS || [
+  'wss://broker.emqx.io:8084/mqtt',
+  'wss://broker.hivemq.com:8884/mqtt',
+  'wss://test.mosquitto.org:8081/mqtt'
 ];
-const PEER_OPTS = { debug: 0, config: { iceServers: ICE } };
-const NO_DIRECT = 'Habéis encontrado la partida, pero vuestra red no deja conectar los móviles. Probad los dos con wifi.';
+const TOPIC = 'asedio-juego-v1/partida/';          // + código de 4 letras
+const NO_ONLINE = 'No se puede jugar online desde aquí: abre el juego desde una web (por ejemplo, GitHub Pages).';
+const NO_WRITE = 'No tienes permiso para escribir en esta página. El dueño debe invitarte con permiso para editar.';
+const NO_SERVER = 'No se pudo conectar con el servidor online. Comprueba tu conexión a internet e inténtalo otra vez.';
+const Net = { mode: null, client: null };
 let netTimer;
 
 /* Identificador de este jugador, guardado en el navegador para poder volver a entrar. */
@@ -43,7 +38,7 @@ function newCode() {
   return Array.from({ length: 4 }, () => A[Math.floor(Math.random() * A.length)]).join('');
 }
 
-/* Llega un estado de la partida (del rival o del almacenamiento): se aplica si es más nuevo. */
+/* Llega un estado de la partida: se aplica si es más nuevo que el que tenemos. */
 function receive(ns) {
   clearTimeout(netTimer); G.net = '';
   if (G.busy && G.s && ns.v < G.s.v) return;
@@ -60,117 +55,148 @@ function receive(ns) {
 
 /* Envía el estado después de una jugada. */
 async function sendState(s) {
-  if (Net.mode === 'claude') return G.ref.set(pack(s));
-  if (Net.conn && Net.conn.open) { Net.conn.send({ t: 'state', s }); return; }
-  throw { code: 'offline' };
+  if (!G.ref) throw { code: 'offline' };
+  return G.ref.set(pack(s));
 }
 
 /* Cierra la conexión al salir de la partida (lo llama leave() en ui.js). */
 function netClose() {
   clearTimeout(netTimer);
-  if (Net.peer) { try { Net.peer.destroy(); } catch (e) {} }
-  Net.mode = null; Net.peer = null; Net.conn = null;
+  if (Net.client) { try { Net.client.end(true); } catch (e) {} }
+  Net.mode = null; Net.client = null;
 }
 
 function fail(msg) { leave(); G.err = msg; render(); }
 
-/* ---------- Crear partida ---------- */
-async function createOnline() {
-  if (window.Peer && !(await claudeDb())) return peerCreate();
-  const db = await claudeDb();
-  if (!db) return fail(NO_ONLINE);
-  return claudeCreate(db);
+/* ======================================================================
+   Modo web: servidor MQTT
+   ====================================================================== */
+
+/* Conecta con un servidor (el número i de la lista). Devuelve el cliente o null si no responde. */
+function brokerConnect(i) {
+  return new Promise(res => {
+    if (!window.mqtt || i >= BROKERS.length) return res(null);
+    const c = mqtt.connect(BROKERS[i], {
+      clientId: 'asedio_' + Math.random().toString(36).slice(2, 12),
+      connectTimeout: 6000, reconnectPeriod: 0, keepalive: 30, clean: true
+    });
+    let done = false;
+    const end = ok => { if (done) return; done = true; clearTimeout(t); if (!ok) { try { c.end(true); } catch (e) {} } res(ok ? c : null); };
+    const t = setTimeout(() => end(false), 7000);
+    c.on('connect', () => { c.options.reconnectPeriod = 2000; end(true); });   // ya dentro: si se cae, reconecta solo
+    c.on('error', () => end(false));
+    c.on('close', () => end(false));                                            // no responde: probar el siguiente
+  });
 }
 
-function peerCreate(tries = 0) {
-  leave(); myId();
-  G.mode = 'online'; Net.mode = 'peer';
-  const code = newCode(), peer = new Peer(PREFIX + code.toLowerCase(), PEER_OPTS);
-  Net.peer = peer;
-  G.net = 'Creando la partida…'; G.code = code; G.screen = 'lobby'; render();
-  netTimer = setTimeout(() => fail('No se pudo conectar con el servidor online. Comprueba tu conexión e inténtalo otra vez.'), 15000);
-
-  peer.on('open', () => {
-    clearTimeout(netTimer);
-    G.s = newGame([G.id, null]); G.me = 0; G.seenV = G.s.v; G.net = ''; G.err = '';
-    render();
-  });
-  peer.on('connection', conn => {
-    conn.on('data', d => hostData(conn, d));
-    conn.on('close', () => {
-      if (conn !== Net.conn) return;
-      Net.conn = null;
-      if (G.mode === 'online') { G.net = 'Tu rival se ha desconectado. Puede volver a entrar con el código.'; render(); }
+/* Lee el último estado guardado de una partida (o null si no existe). */
+function peek(c, code, wait = 2500) {
+  return new Promise(res => {
+    const topic = TOPIC + code;
+    let t;
+    const onMsg = (tp, buf) => {
+      if (tp !== topic) return;
+      clearTimeout(t); c.removeListener('message', onMsg); c.unsubscribe(topic);
+      try { res(buf.length ? JSON.parse(buf.toString()) : null); } catch (e) { res(null); }
+    };
+    c.on('message', onMsg);
+    c.subscribe(topic, { qos: 1 }, err => {
+      if (err) { c.removeListener('message', onMsg); return res(null); }
+      t = setTimeout(() => { c.removeListener('message', onMsg); c.unsubscribe(topic); res(null); }, wait);
     });
   });
-  peer.on('disconnected', () => { try { peer.reconnect(); } catch (e) {} });   // se cayó el servidor de encuentro: la partida sigue
-  peer.on('error', e => {
-    if (e.type === 'unavailable-id' && tries < 5) return peerCreate(tries + 1);  // código ya usado: otro
-    if (!G.s || e.type === 'network' || e.type === 'server-error' || e.type === 'socket-error')
-      return fail('No se pudo conectar con el servidor online. Comprueba tu conexión e inténtalo otra vez.');
+}
+
+/* Se suscribe a la partida: cada vez que alguien publica un estado, llega aquí. */
+function mqttListen(c, code) {
+  const topic = TOPIC + code;
+  G.ref = {
+    set: data => new Promise((ok, ko) =>
+      c.publish(topic, JSON.stringify(data), { qos: 1, retain: true }, err => err ? ko(err) : ok()))
+  };
+  c.on('message', (tp, buf) => {
+    if (tp !== topic || !buf.length) return;
+    let d; try { d = JSON.parse(buf.toString()); } catch (e) { return; }
+    let ns; try { ns = JSON.parse(d.s); } catch (e) { return; }
+    receive(ns);
   });
+  c.on('offline', () => { if (G.mode === 'online') { G.net = 'Sin conexión. Reconectando…'; render(); } });
+  c.on('connect', () => { if (G.mode === 'online' && G.net) { G.net = ''; render(); } });
+  c.subscribe(topic, { qos: 1 });
 }
 
-/* Mensajes que recibe quien creó la partida. */
-function hostData(conn, d) {
-  if (!d || !G.s) return;
-  if (d.t === 'hello') {
-    const s = G.s, guest = s.players[1].id;
-    if (guest && guest !== d.id) { conn.send({ t: 'full' }); setTimeout(() => conn.close(), 400); return; }
-    if (Net.conn && Net.conn !== conn) { try { Net.conn.close(); } catch (e) {} }
-    Net.conn = conn;
-    if (!guest) {                                                // entra el rival por primera vez: empieza
-      s.players[1].id = d.id; s.ev = [];
-      begin(s); s.v++;
-      processEvents(s); G.seenV = s.v;
-      G.screen = 'game';
-    }
-    G.net = '';
-    conn.send({ t: 'state', s: G.s });
-    render();
-  } else if (d.t === 'state') receive(d.s);
+async function mqttCreate() {
+  leave(); myId();
+  G.mode = 'online'; Net.mode = 'mqtt'; G.net = 'Creando la partida…'; G.screen = 'lobby'; render();
+  const gid = G.gid;
+  let c = null;
+  for (let i = 0; i < BROKERS.length && !c; i++) c = await brokerConnect(i);
+  if (gid !== G.gid) { if (c) c.end(true); return; }               // canceló mientras conectaba
+  if (!c) return fail(NO_SERVER);
+  Net.client = c;
+  let code;
+  for (let k = 0; k < 5; k++) { code = newCode(); if (!(await peek(c, code, 1200))) break; }   // código libre
+  if (gid !== G.gid) return;
+  const s = newGame([G.id, null]);
+  G.code = code;
+  mqttListen(c, code);
+  try { await G.ref.set(pack(s)); } catch (e) { return fail(NO_SERVER); }
+  G.s = s; G.me = 0; G.seenV = s.v; G.net = ''; G.err = '';
+  render();
 }
 
-/* ---------- Unirse a una partida ---------- */
+async function mqttJoin(code) {
+  leave(); myId();
+  G.mode = 'online'; Net.mode = 'mqtt'; G.code = code; G.joining = true;
+  G.net = 'Buscando la partida…'; G.screen = 'lobby'; render();
+  const gid = G.gid;
+  // Se busca la partida en cada servidor, por si quien la creó usa otro.
+  let c = null, data = null, reached = false;
+  for (let i = 0; i < BROKERS.length; i++) {
+    c = await brokerConnect(i);
+    if (gid !== G.gid) { if (c) c.end(true); return; }
+    if (!c) continue;
+    reached = true;
+    data = await peek(c, code);
+    if (data) break;
+    c.end(true); c = null;
+  }
+  if (gid !== G.gid) { if (c) c.end(true); return; }
+  if (!data) return fail(reached ? 'No hay ninguna partida con el código ' + code + '.' : NO_SERVER);
+  Net.client = c;
+  let s;
+  try { s = JSON.parse(data.s); } catch (e) { return fail('Esa partida está dañada. Crea una nueva.'); }
+
+  const ids = s.players.map(p => p.id);
+  mqttListen(c, code);
+  if (!ids.includes(G.id)) {
+    if (ids[1]) return fail('Esa partida ya tiene dos jugadores.');
+    s.players[1].id = G.id; s.ev = [];
+    if (s.phase === 'lobby') begin(s);
+    s.v++;
+    try { await G.ref.set(pack(s)); } catch (e) { return fail(NO_SERVER); }
+    G.s = s; G.me = 1; G.seenV = s.v; G.joining = false; G.err = ''; G.net = '';
+    processEvents(s);
+    G.screen = 'game'; render();
+    return;
+  }
+  receive(s);                                                  // vuelves a una partida tuya
+}
+
+/* ---------- Botones del menú ---------- */
+async function createOnline() {
+  const db = await claudeDb();
+  if (db) return claudeCreate(db);
+  if (window.mqtt) return mqttCreate();
+  fail(NO_ONLINE);
+}
 async function joinOnline(code) {
   code = (code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (code.length !== 4) { G.err = 'El código tiene 4 letras o números.'; return render(); }
-  if (window.Peer && !(await claudeDb())) return peerJoin(code);
   const db = await claudeDb();
-  if (!db) return fail(NO_ONLINE);
-  return claudeJoin(db, code);
-}
-
-function peerJoin(code) {
-  leave(); myId();
-  G.mode = 'online'; Net.mode = 'peer'; G.code = code; G.joining = true;
-  G.net = 'Entrando en la partida…'; G.screen = 'lobby'; render();
-  const peer = new Peer(PEER_OPTS);
-  Net.peer = peer;
-  netTimer = setTimeout(() => fail('No se pudo entrar en la partida ' + code + '. Comprueba el código y tu conexión.'), 15000);
-
-  peer.on('open', () => {
-    const conn = peer.connect(PREFIX + code.toLowerCase(), { reliable: true });
-    Net.conn = conn;
-    // Ya hablamos con el servidor: si en 12 s no se abre el canal, es la red la que lo bloquea.
-    clearTimeout(netTimer);
-    netTimer = setTimeout(() => fail(NO_DIRECT), 12000);
-    conn.on('open', () => conn.send({ t: 'hello', id: G.id }));
-    conn.on('data', d => {
-      if (d && d.t === 'state') receive(d.s);
-      else if (d && d.t === 'full') fail('Esa partida ya tiene dos jugadores.');
-    });
-    conn.on('close', () => {
-      if (G.mode !== 'online' || conn !== Net.conn) return;
-      Net.conn = null;
-      G.net = 'Se ha perdido la conexión con tu rival. Vuelve al menú y entra otra vez con el código.'; render();
-    });
-  });
-  peer.on('disconnected', () => { try { peer.reconnect(); } catch (e) {} });
-  peer.on('error', e => {
-    if (e.type === 'peer-unavailable') return fail('No hay ninguna partida con el código ' + code + '.');
-    if (!G.s) return fail('No se pudo conectar con el servidor online. Comprueba tu conexión e inténtalo otra vez.');
-  });
+  if (db) return claudeJoin(db, code);
+  if (window.mqtt) return mqttJoin(code);
+  fail(NO_ONLINE);
 }
 
 /* ======================================================================
