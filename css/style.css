@@ -9,7 +9,7 @@
   --crt:.6;
   /* --h: ancho de las cartas de las manos; --t: ancho de las torres. Crecen con el alto de la pantalla
      (hasta 74 px) para que el tablero siempre quepa entero y quede simétrico. Misma fórmula en fanVars(). */
-  --h:clamp(44px,calc((100vh - 290px) / 7.2),74px);
+  --h:clamp(36px,calc((100vh - 290px) / 7.2),74px);
   --t:calc(var(--h) * .86);
   color-scheme:dark;
 }
@@ -328,3 +328,8 @@ body.crt #crt{display:block}
 .app h1.brand{line-height:0}
 .logo{width:min(64vw,260px);height:auto;image-rendering:pixelated;filter:drop-shadow(0 0 18px rgba(232,150,60,.25))}
 .menu .logo{width:min(78vw,325px)}
+
+/* En el móvil, 100vh incluye la barra del navegador y las cartas quedaban por debajo:
+   100dvh es solo la parte que se ve. */
+@supports (height:100dvh){:root{--h:clamp(36px,calc((100dvh - 290px) / 7.2),74px)}}
+.hand{padding-bottom:calc(16px + env(safe-area-inset-bottom,0px))}
