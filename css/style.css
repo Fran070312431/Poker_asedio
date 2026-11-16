@@ -1,0 +1,329 @@
+:root{
+  /* Mesa de cartas en un castillo a oscuras, a la luz de una vela: madera, pergamino, tinta y sangre.
+     Una sola columna. De arriba abajo: mano rival, torres rivales, su fila, bosque, tu fila, tus torres, tu mano. */
+  --bg:#070605; --panel:#15100b; --panel-2:#2a1e13; --line:#5a4326;
+  --bone:#e6dcc0; --ink:#0a0806; --amber:#e8a33d; --blood:#8e1f1f; --muted:#9a8a6a;
+  --paper:#cdb98a; --paper-dark:#b39c6c;
+  --display:"Press Start 2P", "Courier New", monospace;
+  --body:"VT323", "Courier New", monospace;
+  --crt:.6;
+  /* --h: ancho de las cartas de las manos; --t: ancho de las torres. Crecen con el alto de la pantalla
+     (hasta 74 px) para que el tablero siempre quepa entero y quede simétrico. Misma fórmula en fanVars(). */
+  --h:clamp(44px,calc((100vh - 290px) / 7.2),74px);
+  --t:calc(var(--h) * .86);
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;overflow:hidden}
+body{background:var(--bg);color:var(--bone);font-family:var(--body);font-size:20px;line-height:1.15}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer}
+button:focus-visible,input:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
+.spr{display:inline-block;background:center/contain no-repeat;image-rendering:pixelated;flex:none}
+
+/* El escenario entero (fondo, mesa y efectos) tiembla junto */
+#stage{position:fixed;inset:0}
+#scene{position:absolute;top:0;left:50%;transform:translateX(-50%);width:100%;height:100%;image-rendering:pixelated;transition:filter .8s}
+.app{position:relative;z-index:1;max-width:480px;height:100%;margin:0 auto;padding:10px 16px;display:flex;flex-direction:column;gap:6px}
+#fx{position:absolute;inset:0;z-index:20;pointer-events:none;perspective:800px}
+/* Luz de vela: centro cálido, bordes en penumbra */
+#vig{position:fixed;inset:0;pointer-events:none;z-index:35;
+  background:radial-gradient(ellipse at 50% 64%,rgba(232,150,60,.10) 0,transparent 45%),
+             radial-gradient(ellipse at 50% 58%,transparent 36%,rgba(0,0,0,.82) 100%)}
+
+/* ---------- Botones ---------- */
+.btn{border:2px solid var(--ink);background:var(--panel-2);padding:10px 14px;text-align:left;text-transform:uppercase;letter-spacing:.04em;
+  box-shadow:inset -3px -3px 0 #170f08,inset 3px 3px 0 #4a3521,3px 3px 0 #000;display:flex;align-items:center;gap:10px;
+  transition:transform .08s,filter .08s}
+.btn:active{transform:translate(2px,2px);box-shadow:inset -3px -3px 0 #170f08,inset 3px 3px 0 #4a3521,1px 1px 0 #000}
+.btn.primary{background:var(--amber);color:var(--ink);box-shadow:inset -3px -3px 0 #a26c1e,inset 3px 3px 0 #ffd58a,3px 3px 0 #000}
+.btn.small{padding:5px 12px;font-size:18px}
+.btn.icon{padding:6px}
+.btn.icon .spr{width:22px;height:22px}
+.btn:disabled{opacity:.4;cursor:default}
+@media (hover:hover){.btn:hover:not(:disabled){transform:translateY(-2px);filter:brightness(1.2)}}
+
+/* ---------- Intro ---------- */
+.intro{justify-content:center;align-items:center;text-align:center;gap:18px;cursor:pointer}
+.intro p{margin:0;font-size:24px;color:var(--bone);animation:introIn .7s steps(7) both;animation-delay:calc(var(--k)*1.4s + .4s)}
+.intro h1{font:400 30px/1.25 var(--display);margin:14px 0 0;line-height:0;color:var(--amber);text-shadow:3px 3px 0 var(--blood),6px 6px 0 #000;
+  animation:slam .4s cubic-bezier(.2,1.6,.4,1) both;animation-delay:4.8s}
+.intro .tap{color:var(--muted);text-transform:uppercase;animation:introIn .4s steps(4) both,blink 1.2s steps(2) infinite;animation-delay:5.8s,6.2s}
+body.intro #scene{filter:brightness(.3)}
+@keyframes introIn{from{opacity:0;transform:translateY(8px)}}
+@keyframes blink{50%{opacity:.25}}
+@keyframes slam{0%{transform:scale(1.35) rotate(-4deg);filter:brightness(2)}100%{transform:none;filter:none}}
+
+/* ---------- Menú: cuatro cartas grandes que flotan, se inclinan hacia el puntero y se giran al tocarlas ---------- */
+.menu{justify-content:space-between;gap:12px;padding-bottom:22px}
+.menu h1{font:400 28px/1.25 var(--display);margin:0;padding-top:18px;line-height:0;text-align:center;color:var(--amber);text-shadow:3px 3px 0 var(--blood),6px 6px 0 #000}
+.mfan{display:flex;justify-content:center;align-items:center;flex:1;min-height:200px;perspective:700px}
+.mfan-in{display:flex;justify-content:center}
+/* Capas de cada carta del menú: .mc (botón quieto, es lo único que detecta el ratón) > .mcf (flota)
+   > .mct (se inclina hacia el puntero) > .mci (se levanta y se gira). Las de dentro no detectan el ratón. */
+.mct{display:block;pointer-events:none;transform:rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg));transition:transform .25s ease-out}
+.mc{width:96px;flex:none;margin:0 -12px;border:0;padding:0;background:none;
+  transform:rotate(calc(var(--d)*8deg)) translateY(calc(var(--d)*var(--d)*7px));transition:transform .15s cubic-bezier(.2,1.5,.4,1)}
+.mcf{display:block;pointer-events:none;perspective:600px;animation:mfloat calc(2.4s + var(--k)*.35s) ease-in-out infinite;animation-delay:calc(var(--k)*-.8s)}
+.mci{display:block;pointer-events:none;filter:drop-shadow(6px 10px 0 rgba(0,0,0,.6));transition:transform .15s cubic-bezier(.2,1.5,.4,1)}
+@media (hover:hover){.mc:hover{z-index:2}.mc:hover .mci{transform:translateY(-22px) scale(1.08)}}
+@keyframes mfloat{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-10px) rotate(1.5deg)}}
+.stack{display:flex;flex-direction:column;gap:10px}
+.trio{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.trio .btn{flex-direction:column;align-items:center;gap:4px;padding:8px 4px;font-size:17px}
+.trio .spr{width:22px;height:22px}
+.join{display:flex;gap:8px}
+.join input{flex:1;min-width:0;background:var(--bg);border:2px solid var(--line);font:400 14px var(--display);letter-spacing:.3em;
+  text-transform:uppercase;padding:10px}
+.plate{background:rgba(10,8,6,.84);border:2px solid var(--line);box-shadow:4px 4px 0 #000;padding:12px;display:flex;flex-direction:column;gap:10px}
+.plate p{margin:0;color:var(--muted)}
+.note{font-size:18px;color:var(--muted)}
+.err{color:#e0776c}
+.code{font:400 34px var(--display);letter-spacing:.2em;color:var(--amber);text-shadow:3px 3px 0 #000}
+
+/* ---------- Mesa ---------- */
+.top{flex:none;display:flex;align-items:center;gap:8px}
+.top .who{flex:1;font:400 10px var(--display);color:var(--muted);text-align:center;text-shadow:2px 2px 0 #000}
+.row,.lanes{flex:none;display:grid;grid-template-columns:repeat(4,var(--t));gap:26px;justify-content:center}
+/* Espacio para el marco de piedra y las almenas, que no deben tocar las casillas de delante:
+   el rival tiene las almenas abajo; tú, arriba. */
+#rowOp{margin:12px 0 22px}
+#rowMe{margin:22px 0 12px}
+.slot{position:relative;border:0;padding:0;background:none;transition:transform .1s}
+.slot.tower{aspect-ratio:5/7}
+/* Las torres van dentro de un marco de piedra con almenas, para que se vea que son torres */
+.slot.tower::after{content:"";position:absolute;inset:-6px;z-index:-1;background:#3b332c;
+  background-image:linear-gradient(#211b17 1px,transparent 1px),linear-gradient(90deg,#211b17 1px,transparent 1px);
+  background-size:12px 6px,12px 12px;box-shadow:inset 0 0 0 2px #0f0c0a,inset 3px 3px 0 #514740}
+.slot.tower::before{content:"";position:absolute;left:-6px;right:-6px;top:-15px;height:10px;z-index:-1;
+  background:linear-gradient(#0f0c0a 2px,transparent 2px),linear-gradient(90deg,transparent 2px,#514740 2px 4px,transparent 4px),
+    repeating-linear-gradient(90deg,#0f0c0a 0 2px,#3b332c 2px 10px,#0f0c0a 10px 12px,transparent 12px 17px);
+  background-size:17px 100%,17px 100%,auto}
+.slot.tower.empty{border:0;background:#0e0b09}
+/* Torres del rival: el marco va del revés, con las almenas abajo, mirando hacia ti */
+.slot.tower.foe::before{top:auto;bottom:-15px;transform:scaleY(-1)}
+.slot.tower.foe::after{box-shadow:inset 0 0 0 2px #0f0c0a,inset 3px -3px 0 #514740}
+.slot.tower.empty::after{inset:-6px}
+.lanes .slot{width:80%;justify-self:center;aspect-ratio:5/7}
+.slot.empty,.lane-look,.rubble-look{border:2px dashed rgba(230,220,192,.28);background:rgba(10,8,6,.45);display:flex;align-items:center;justify-content:center}
+.lane-look,.rubble-look{aspect-ratio:5/7;width:100%}
+.slot.empty .spr,.rubble-look .spr{width:74%;aspect-ratio:2/1;opacity:.6}
+.lanes .slot.empty::after,.lane-look::after{content:"";width:30%;aspect-ratio:1;border:2px solid rgba(230,220,192,.14);transform:rotate(45deg)}
+.tgt{outline:3px solid var(--amber);outline-offset:3px;z-index:2}
+.tgt.over{outline-color:#fff;transform:scale(1.14)}
+@media (hover:hover){.tgt:hover{outline-color:#fff}}
+@keyframes bob{50%{transform:translateY(-4px)}}
+/* Escudos apilados: las cartas de debajo asoman por arriba */
+.under{position:absolute;left:0;right:0;top:0;transform:translateY(calc(var(--n)*-5px))}
+.slot .topc{position:relative;display:block;width:100%}
+.slot>.card,.slot .under .card{width:100%}
+
+/* ---------- Cartas ----------
+   Pergamino viejo con tinta. Arriba a la izquierda el número; arriba a la derecha su valor
+   (en las torres, la vida que le queda). Debajo, una ventana solo para el palo.
+   Las medidas van en cqw (porcentaje del ancho de la carta) para que sirva en cualquier tamaño. */
+/* Esquinas en escalera de pixel art: 2 escalones de 3 px en cada esquina, con borde de 3 px.
+   Como el recorte también cortaría la sombra, la sombra va en el elemento que contiene la carta. */
+.card{position:relative;width:100%;aspect-ratio:5/7;container-type:inline-size;background:var(--paper);border:3px solid var(--ink);color:#17110b;
+  clip-path:polygon(0 6px,3px 6px,3px 3px,6px 3px,6px 0,
+    calc(100% - 6px) 0,calc(100% - 6px) 3px,calc(100% - 3px) 3px,calc(100% - 3px) 6px,100% 6px,
+    100% calc(100% - 6px),calc(100% - 3px) calc(100% - 6px),calc(100% - 3px) calc(100% - 3px),calc(100% - 6px) calc(100% - 3px),calc(100% - 6px) 100%,
+    6px 100%,6px calc(100% - 3px),3px calc(100% - 3px),3px calc(100% - 6px),0 calc(100% - 6px));
+  box-shadow:inset -2px -2px 0 var(--paper-dark),inset 2px 2px 0 #e0cfa2;
+  background-image:repeating-conic-gradient(rgba(90,60,20,.10) 0 25%,transparent 0 50%);background-size:4px 4px}
+.card::before{content:"";position:absolute;inset:-3px;pointer-events:none;z-index:2;
+  --e:linear-gradient(var(--edge,#0a0806),var(--edge,#0a0806));
+  background:var(--e) 3px 3px/3px 3px no-repeat,var(--e) calc(100% - 3px) 3px/3px 3px no-repeat,
+    var(--e) 3px calc(100% - 3px)/3px 3px no-repeat,var(--e) calc(100% - 3px) calc(100% - 3px)/3px 3px no-repeat}
+.card.back{--edge:#5a4326}
+.card.red{color:var(--blood)}
+.card .in{height:100%;display:flex;flex-direction:column;padding:7cqw;gap:5cqw}
+.card .hd{display:flex;justify-content:space-between;align-items:center;height:18cqw}
+.card .rk{font:400 15cqw/1 var(--display)}
+.card .val{font:400 17cqw/1 var(--display);color:#000;text-shadow:1px 1px 0 rgba(255,250,230,.6)}
+.card .val.low{color:#c4100a}
+.card .val.high{color:#14632a}
+/* En la mesa (torres y casillas) las cartas son más pequeñas: el valor se agranda para leerse bien */
+.slot .card .val,.ov .card .val{font-size:22cqw}
+.card .art{flex:1;min-height:0;background:rgba(120,90,40,.22);box-shadow:inset 0 0 0 1px #17110b,inset 0 0 0 3px rgba(23,17,11,.12);
+  display:flex;align-items:center;justify-content:center}
+.card .art .spr{width:62%;height:62%}
+.card.back{background:#1c140d;border-color:#5a4326;box-shadow:inset -2px -2px 0 #0e0906,inset 2px 2px 0 #33241a;
+  background-image:repeating-linear-gradient(45deg,rgba(232,163,61,.07) 0 2px,transparent 2px 7px),repeating-linear-gradient(-45deg,rgba(232,163,61,.07) 0 2px,transparent 2px 7px)}
+.card.back .art{background:rgba(0,0,0,.35);box-shadow:inset 0 0 0 1px #5a4326,inset 0 0 0 4px #1c140d,inset 0 0 0 5px #5a4326}
+.card.back .art .spr{width:56%;height:56%}
+.card.peek{filter:brightness(.72)}
+.su-S{background-image:var(--spr-S)}.su-C{background-image:var(--spr-C)}.su-H{background-image:var(--spr-H)}.su-D{background-image:var(--spr-D)}
+.ic-sigil{background-image:var(--spr-sigil)}.ic-rubble{background-image:var(--spr-rubble)}.ic-gear{background-image:var(--spr-gear)}
+.ic-trophy{background-image:var(--spr-trophy)}.ic-trophy-off{background-image:var(--spr-trophy-off)}.ic-book{background-image:var(--spr-book)}
+.ic-arrow{background-image:var(--spr-arrow)}.ic-door{background-image:var(--spr-door)}
+
+/* Sombra de las cartas, en lo que las contiene (el recorte de esquinas no la deja ir en la carta) */
+.slot.tower:not(.empty),.slot .topc,.slot .under,.pile,.oc,.ov,.fan .card{filter:drop-shadow(3px 3px 0 #000)}
+
+/* ---------- Mano del rival: igual que la tuya pero boca abajo, asomando por arriba ----------
+   El abanico se curva al revés (eje por encima). Cuando elige carta, la baja igual que tú levantas la tuya. */
+.top{position:relative;z-index:3}
+/* Simetría: la mano del rival ocupa exactamente lo mismo que la tuya, en espejo (cartas pegadas arriba). */
+.ohand{flex:none;display:flex;justify-content:center;align-items:flex-start;height:calc(var(--h) * 1.4 + 42px);padding-top:16px}
+.oc{position:relative;width:var(--h);flex:none;margin:0 var(--m,-12px);transform-origin:50% -120%;transform:rotate(calc(var(--d)*var(--a,4deg)*-1))}
+.oci{display:block;pointer-events:none;transition:transform .16s cubic-bezier(.2,1.5,.4,1)}
+.oc.hov .oci{transform:translateY(12px) scale(1.06)}
+.oc.sel{z-index:3;filter:drop-shadow(3px 3px 0 #000) drop-shadow(0 0 7px var(--amber))}
+.oc.sel .oci{transform:translateY(16px) scale(1.1)}
+
+/* ---------- Centro: el bosque separa las dos filas ---------- */
+/* Centro: botones a los lados, y en medio mazo · turno y Pasar · descarte */
+.mid{flex:1;min-height:70px;display:grid;grid-template-columns:44px minmax(0,1fr) 44px;align-items:center;gap:4px}
+.side{display:flex;flex-direction:column;align-items:center;gap:8px;position:relative;z-index:3}
+.side .who{font:400 9px var(--display);color:var(--muted);text-shadow:2px 2px 0 #000}
+.center{display:flex;align-items:center;justify-content:center;gap:12px;min-width:0}
+#passBtn{min-width:112px;justify-content:center;font-size:17px}
+.turnbox{display:flex;flex-direction:column;align-items:center;gap:6px}
+.pile{position:relative;width:44px;flex:none;border:0;padding:0;background:none;transition:transform .1s}
+.pile .none{aspect-ratio:5/7;border:2px dashed rgba(154,138,106,.45)}
+.pile .count{position:absolute;right:-10px;bottom:-8px;background:var(--ink);border:2px solid var(--line);color:var(--bone);font-size:16px;line-height:1;padding:1px 4px}
+body.dragging .pile[data-drop]{outline:3px dashed var(--amber);outline-offset:4px}
+body.dragging .pile[data-drop].over{outline-style:solid;outline-color:#fff;transform:scale(1.1)}
+.turn{width:28px;height:28px;animation:bob .8s steps(4) infinite}
+.turn.me{transform:rotate(180deg);animation-name:bob-down}
+@keyframes bob-down{0%,100%{transform:rotate(180deg)}50%{transform:rotate(180deg) translateY(-4px)}}
+
+
+/* ---------- Mano en abanico ----------
+   --d es la posición de la carta respecto al centro (-2..2). Girar con el eje muy por debajo
+   de la carta hace que todas queden sobre un arco. */
+.hand{flex:none;display:flex;justify-content:center;align-items:flex-end;height:calc(var(--h) * 1.4 + 42px);padding-bottom:16px;--a:5deg;--m:-12px}
+.hc{width:var(--h);flex:none;margin:0 var(--m);border:0;padding:0;background:none;touch-action:none;transform-origin:50% 200%;
+  transform:rotate(calc(var(--d)*var(--a)));transition:transform .14s cubic-bezier(.2,1.5,.4,1),filter .1s;filter:drop-shadow(3px 3px 0 #000)}
+/* La zona que detecta el ratón es solo el botón, que nunca se mueve. El dibujo de dentro (.hci) sube y crece,
+   pero no cuenta para el ratón: así pasar por los bordes no hace que la carta suba y baje sin parar.
+   La franja de arriba (::after) cubre el hueco que deja la carta al levantarse. */
+.hc{position:relative}
+.hc::after{content:"";position:absolute;left:0;right:0;bottom:100%;height:18px}
+.hci{display:block;pointer-events:none;transition:transform .14s cubic-bezier(.2,1.5,.4,1)}
+.hc.sel{z-index:6;filter:drop-shadow(3px 3px 0 #000) drop-shadow(0 0 7px var(--amber))}
+.hci{transition:transform .14s ease-out}
+/* Carta elegida: levantada y con brillo. Solo se inclina en 3D mientras el ratón está encima (--tx, --ty). */
+.hc.sel .hci{transform:perspective(500px) translateY(-16px) scale(1.1) rotateX(var(--tx,0deg)) rotateY(var(--ty,0deg))}
+.hc.dim{filter:drop-shadow(3px 3px 0 #000) brightness(.5)}
+.hc.ghosted{opacity:.2}
+.hc:disabled{cursor:default}
+.hc.new{animation:deal .32s cubic-bezier(.2,1.2,.4,1) backwards;animation-delay:calc(var(--k)*70ms)}
+@media (hover:hover){.hc:hover:not(:disabled):not(.sel){z-index:5;filter:drop-shadow(3px 3px 0 #000) brightness(1.12)}.hc:hover:not(:disabled):not(.sel) .hci{transform:perspective(500px) translateY(-12px) scale(1.08) rotateX(var(--tx,0deg)) rotateY(var(--ty,0deg))}}
+@keyframes deal{from{transform:translate(-90px,-220px) rotate(-50deg) scale(.4);opacity:0}}
+
+/* Pantallas bajas: todo un poco más pequeño para que quepa */
+@media (max-height:740px){
+  .center{gap:8px}
+  #passBtn{min-width:100px;font-size:16px}
+  .pile{width:34px}
+  .mc{width:80px}
+}
+
+/* ---------- Jugo: arrastre, cartas que vuelan, partículas, sacudidas ---------- */
+.ghost{position:fixed;z-index:30;pointer-events:none;width:calc(var(--h) * 1.14);transform:translate(-50%,-62%) rotate(var(--tilt,0deg)) scale(1.12);
+  filter:drop-shadow(8px 12px 0 rgba(0,0,0,.6));transition:transform .06s}
+.ghost.back{transition:left .16s,top .16s,opacity .16s;opacity:0}
+.ov{position:absolute;pointer-events:none}
+.ov.wait{visibility:hidden}
+.ov.fly{z-index:3;filter:drop-shadow(6px 9px 0 rgba(0,0,0,.6))}
+.pt{position:fixed;z-index:25;width:6px;height:6px;pointer-events:none;animation:pt .6s steps(8) forwards}
+@keyframes pt{to{transform:translate(var(--dx),var(--dy));opacity:0}}
+.float{position:fixed;z-index:26;pointer-events:none;transform:translate(-50%,-50%);font:400 16px var(--display);white-space:nowrap;
+  text-shadow:2px 2px 0 #000,-2px -2px 0 #000,2px -2px 0 #000,-2px 2px 0 #000;animation:float 1s cubic-bezier(.2,1.4,.4,1) forwards}
+@keyframes float{0%{transform:translate(-50%,-50%) scale(.4)}20%{transform:translate(-50%,-70%) scale(1.3)}100%{transform:translate(-50%,-160%) scale(1);opacity:0}}
+#stage.shake{animation:shake .22s steps(4)}
+#stage.shake-big{animation:shake-big .42s steps(8)}
+@keyframes shake{25%{transform:translate(-3px,1px)}50%{transform:translate(3px,-1px)}75%{transform:translate(-2px,2px)}}
+@keyframes shake-big{12%{transform:translate(-9px,3px)}25%{transform:translate(8px,-4px)}37%{transform:translate(-6px,5px)}50%{transform:translate(5px,-2px)}62%{transform:translate(-4px,2px)}75%{transform:translate(3px,-2px)}87%{transform:translate(-2px,1px)}}
+
+/* ---------- Pantalla final ---------- */
+.end{position:fixed;inset:0;z-index:36;display:flex;align-items:center;justify-content:center;padding:16px;overflow:hidden;
+  background:rgba(3,2,2,.84);animation:fadeIn .4s both}
+.end.lose{background:radial-gradient(ellipse at 50% 45%,rgba(70,8,8,.88),rgba(3,2,2,.97) 70%)}
+.rays{position:absolute;left:50%;top:45%;width:220vmax;height:220vmax;margin:-110vmax 0 0 -110vmax;
+  background:repeating-conic-gradient(rgba(232,163,61,.13) 0 9deg,transparent 9deg 18deg);animation:spin 24s linear infinite}
+.lose .rays{display:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.endbox{position:relative;text-align:center;display:flex;flex-direction:column;align-items:center;gap:14px;max-width:360px}
+.end-ic{width:76px;height:76px;animation:slam .5s cubic-bezier(.2,1.6,.4,1) both}
+.lose .end-ic{animation:crumbleIn .9s steps(6) both;filter:drop-shadow(0 0 10px rgba(198,63,56,.5))}
+@keyframes crumbleIn{0%{transform:translateY(-30px);opacity:0}40%{transform:none;opacity:1}60%{transform:translateX(-4px) rotate(-4deg)}80%{transform:translateX(4px) rotate(3deg)}100%{transform:none}}
+.endt{font:400 30px/1 var(--display);margin:0;color:var(--amber);text-shadow:3px 3px 0 var(--blood),6px 6px 0 #000;white-space:nowrap}
+.endt span{display:inline-block;animation:drop .55s cubic-bezier(.2,1.5,.4,1) both;animation-delay:calc(.25s + var(--i) * .08s)}
+.lose .endt{color:#d4473d;text-shadow:3px 3px 0 #2a0505,6px 6px 0 #000}
+.lose .endt span{animation-name:dropLose}
+@keyframes drop{from{transform:translateY(-90px) scale(1.7);opacity:0}}
+@keyframes dropLose{0%{transform:translateY(-90px);opacity:0}60%{transform:translateY(0) rotate(0)}100%{transform:translateY(var(--y)) rotate(var(--r))}}
+.ends{margin:0;color:var(--bone)}
+.endtw{display:flex;gap:10px}
+.em{width:46px;filter:drop-shadow(3px 3px 0 #000);animation:drop .45s cubic-bezier(.2,1.5,.4,1) both;animation-delay:calc(1s + var(--i) * .12s)}
+.em.gone{aspect-ratio:5/7;border:2px dashed rgba(230,220,192,.3);display:flex;align-items:center;justify-content:center;filter:none}
+.em.gone .spr{width:76%;aspect-ratio:2/1;opacity:.6}
+.endst{display:flex;gap:16px;animation:fadeIn .5s 1.5s both}
+.endst span{font-size:17px;color:var(--muted);text-transform:uppercase}
+.endst b{display:block;font:400 18px var(--display);color:var(--amber);margin-bottom:4px}
+.lose .endst b{color:#d4473d}
+.end .acts{display:flex;gap:10px;animation:fadeIn .5s 1.8s both}
+.conf{position:absolute;top:-14px;width:6px;height:10px;animation:fall linear infinite}
+@keyframes fall{to{transform:translateY(112vh) rotate(720deg)}}
+.ash{position:absolute;bottom:-10px;width:4px;height:4px;background:#6b5a50;animation:rise linear infinite}
+@keyframes rise{to{transform:translate(var(--dx),-112vh);opacity:0}}
+
+/* ---------- Ventanas ---------- */
+.scrim{position:fixed;inset:0;z-index:37;background:rgba(3,2,2,.45);animation:fadeIn .2s both}
+.drawer{position:fixed;top:50%;z-index:38;width:min(330px,86vw);max-height:84vh;overflow:auto;background:var(--panel);border:3px solid var(--amber);
+  box-shadow:6px 6px 0 #000;padding:16px;display:flex;flex-direction:column;gap:12px;animation:slideR .28s cubic-bezier(.2,1.2,.4,1) both}
+.drawer.right{right:0;border-right:0;transform:translateY(-50%)}
+.drawer.left{left:0;border-left:0;transform:translateY(-50%);animation-name:slideL}
+.drawer h2{font:400 14px/1.4 var(--display);margin:0;color:var(--amber)}
+.drawer p,.drawer ul{margin:0}
+.drawer ul{padding-left:20px;display:flex;flex-direction:column;gap:3px}
+.drawer .acts{display:flex;gap:8px;flex-wrap:wrap}
+.drawer.right.out{animation:outR .2s ease-in both}
+.drawer.left.out{animation:outL .2s ease-in both}
+.scrim.out{animation:fadeOut .2s both}
+@keyframes outR{to{transform:translate(105%,-50%)}}
+@keyframes outL{to{transform:translate(-105%,-50%)}}
+@keyframes fadeOut{to{opacity:0}}
+@keyframes slideR{from{transform:translate(105%,-50%)}to{transform:translate(0,-50%)}}
+@keyframes slideL{from{transform:translate(-105%,-50%)}to{transform:translate(0,-50%)}}
+@keyframes fadeIn{from{opacity:0}}
+.veil{position:fixed;inset:0;background:rgba(3,2,2,.84);display:flex;align-items:center;justify-content:center;padding:16px;z-index:36}
+#modal .veil{z-index:37}
+.dialog{background:var(--panel);border:2px solid var(--amber);box-shadow:6px 6px 0 #000;padding:16px;max-width:420px;width:100%;max-height:92%;
+  overflow:auto;display:flex;flex-direction:column;gap:12px;animation:slam .2s cubic-bezier(.2,1.4,.4,1)}
+.dialog h2{font:400 14px/1.4 var(--display);margin:0;color:var(--amber)}
+.dialog p,.dialog ul{margin:0}
+.dialog ul{padding-left:20px;display:flex;flex-direction:column;gap:3px}
+.dialog .acts{display:flex;gap:8px;flex-wrap:wrap}
+.opt{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:30px}
+.opt.sub{color:var(--muted);padding-left:14px}
+input[type=checkbox]{appearance:none;-webkit-appearance:none;width:26px;height:26px;margin:0;background:var(--bg);border:2px solid var(--line);cursor:pointer;flex:none}
+input[type=checkbox]:checked{background:var(--amber);box-shadow:inset 0 0 0 4px var(--bg)}
+input[type=range]{appearance:none;-webkit-appearance:none;width:150px;height:10px;background:var(--bg);border:2px solid var(--line);cursor:pointer;flex:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:22px;background:var(--amber);border:2px solid var(--ink)}
+input[type=range]::-moz-range-thumb{width:12px;height:20px;background:var(--amber);border:2px solid var(--ink);border-radius:0}
+.achv{display:flex;gap:10px;align-items:center;padding:6px 8px;border:2px solid var(--line);background:var(--bg)}
+.achv .spr{width:26px;height:26px}
+.achv b{display:block;font-weight:400;color:var(--amber);text-transform:uppercase}
+.achv span{color:var(--muted);font-size:18px}
+.achv.off b{color:var(--muted)}
+.toast{position:fixed;left:50%;top:10px;transform:translateX(-50%);background:var(--ink);color:var(--amber);border:2px solid var(--amber);
+  box-shadow:4px 4px 0 #000;padding:8px 12px;z-index:38;max-width:92%;text-align:center;text-transform:uppercase}
+
+/* ---------- Filtro retro: solo líneas horizontales de pantalla CRT, sin destellos ---------- */
+#crt{display:none;position:fixed;inset:0;pointer-events:none;z-index:40;opacity:var(--crt);
+  background:repeating-linear-gradient(to bottom,rgba(0,0,0,.62) 0 2px,transparent 2px 4px)}
+body.crt #crt{display:block}
+
+@media (prefers-reduced-motion:reduce){
+  .tgt,.hc.new,#stage.shake,#stage.shake-big,.dialog,.turn,.intro p,.intro h1,.intro .tap,.mcf,.rays,.conf,.ash{animation:none}
+  .hc,.btn,.slot,.mc,.mct{transition:none}
+  .drawer,.scrim{animation:none}
+}
+
+/* Logo: pixel art escalado sin suavizar (65x21 píxeles) */
+.logo{width:min(84vw,390px);height:auto;image-rendering:pixelated;filter:drop-shadow(0 0 18px rgba(232,150,60,.25))}
+.menu .logo{width:min(78vw,325px)}

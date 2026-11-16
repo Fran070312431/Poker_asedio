@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Asedio</title>
+<link rel="icon" href="img/icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="stage">
+  <canvas id="scene" aria-hidden="true"></canvas>
+  <div id="app" class="app"></div>
+  <div id="fx" aria-hidden="true"></div>   <!-- cartas en movimiento y efectos -->
+</div>
+<div id="modal"></div>
+<div id="toast" class="toast" hidden></div>
+<div id="vig" aria-hidden="true"></div>
+<div id="crt" aria-hidden="true"></div>
+
+<!-- Orden de carga: cada archivo usa lo que definen los anteriores -->
+<script src="js/settings.js"></script>      <!-- ajustes guardados -->
+<script src="js/sprites.js"></script>       <!-- pixel art -->
+<script src="js/scene.js"></script>         <!-- fondo: la mesa -->
+<script src="js/audio.js"></script>         <!-- música y efectos -->
+<script src="js/achievements.js"></script>  <!-- logros -->
+<script src="js/engine.js"></script>        <!-- reglas del juego -->
+<script src="js/ai.js"></script>            <!-- rival IA -->
+<script src="js/vendor/peerjs.min.js"></script>  <!-- conexión entre móviles (MIT) -->
+<script src="js/online.js"></script>        <!-- partidas con código -->
+<script src="js/ui.js"></script>            <!-- pantalla y controles -->
+</body>
+</html>
